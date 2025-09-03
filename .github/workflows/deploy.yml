@@ -6,6 +6,10 @@ on:
     paths: [ "app/**", "helm/**", ".github/workflows/deploy.yml" ]
   workflow_dispatch:
 
+permissions:
+  id-token: write    # needed for azure/login (OIDC token)
+  contents: read     # to checkout the repo
+
 env:
   REGISTRY_NAME: ${{ secrets.ACR_NAME }}   # e.g. aiplatabc123 (no .azurecr.io)
   AKS_RG:       ${{ secrets.AKS_RG }}      # e.g. Keith-ai-rg
