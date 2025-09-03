@@ -3,7 +3,10 @@ name: Build and Deploy to AKS
 on:
   push:
     branches: [ "main" ]
-    paths: [ "app/**", "helm/**", ".github/workflows/deploy.yml" ]
+    paths:
+      - "app/**"
+      - "helm/**"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 permissions:
@@ -16,18 +19,14 @@ env:
   AKS_NAME:     ${{ secrets.AKS_NAME }}    # e.g. ai-plat-dev-aks
   IMAGE_NAME:   ai-service
 
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Azure Login
-      uses: azure/login@v2
-      with:
-        client-id:       ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
-        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        client-secret:   ${{ secrets.AZURE_CLIENT_SECRET }}
+permissions:
+  contents: read
+  # (id-token permission not required when using creds JSON)
+
+- name: Azure Login (service principal secret)
+  uses: azure/login@v2
+  with:
+    creds: ${{ secrets.AZURE_CREDENTIALS }}
 
     - name: Resolve ACR login server
       id: acr
@@ -43,16 +42,23 @@ jobs:
 
     - name: Build & Push image with ACR Tasks
       run: |
-        az acr build --registry "$REGISTRY_NAME" \
+        az acr build \
+          --registry "$REGISTRY_NAME" \
           --image "$IMAGE_NAME:${{ steps.meta.outputs.TAG }}" \
           --file app/Dockerfile ./app
 
-    - uses: azure/setup-helm@v4
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+
     - name: Get AKS credentials
-      run: az aks get-credentials -g "$AKS_RG" -n "$AKS_NAME" --overwrite-existing
+      run: |
+        az aks get-credentials -g "$AKS_RG" -n "$AKS_NAME" --overwrite-existing
+        kubectl cluster-info
+
     - name: Helm upgrade/install
       run: |
         helm upgrade --install "$IMAGE_NAME" ./helm/ai-service \
           --set image.repository="${{ steps.acr.outputs.LOGIN_SERVER }}/$IMAGE_NAME" \
           --set image.tag="${{ steps.meta.outputs.TAG }}"
         kubectl rollout status deploy/$IMAGE_NAME
+        kubectl get deploy,svc -l app.kubernetes.io/name=$IMAGE_NAME -o wide
