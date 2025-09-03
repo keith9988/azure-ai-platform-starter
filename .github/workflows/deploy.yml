@@ -9,24 +9,28 @@ on:
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
+# We're authenticating with a service principal JSON (creds), not OIDC
 permissions:
-  id-token: write    # needed for azure/login (OIDC token)
-  contents: read     # to checkout the repo
+  contents: read
 
 env:
-  REGISTRY_NAME: ${{ secrets.ACR_NAME }}   # e.g. aiplatabc123 (no .azurecr.io)
+  REGISTRY_NAME: ${{ secrets.ACR_NAME }}   # e.g. aiplat4f0dad7a  (NO .azurecr.io)
   AKS_RG:       ${{ secrets.AKS_RG }}      # e.g. Keith-ai-rg
   AKS_NAME:     ${{ secrets.AKS_NAME }}    # e.g. ai-plat-dev-aks
   IMAGE_NAME:   ai-service
 
-permissions:
-  contents: read
-  # (id-token permission not required when using creds JSON)
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
 
-- name: Azure Login (service principal secret)
-  uses: azure/login@v2
-  with:
-    creds: ${{ secrets.AZURE_CREDENTIALS }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login (service principal JSON)
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
 
     - name: Resolve ACR login server
       id: acr
