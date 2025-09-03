@@ -66,3 +66,30 @@ jobs:
           --set image.tag="${{ steps.meta.outputs.TAG }}"
         kubectl rollout status deploy/$IMAGE_NAME
         kubectl get deploy,svc -l app.kubernetes.io/name=$IMAGE_NAME -o wide
+
+    - name: Render Helm chart to manifests
+      run: |
+        helm template "$IMAGE_NAME" ./helm/ai-service \
+          --set image.repository="${{ steps.acr.outputs.LOGIN_SERVER }}/$IMAGE_NAME" \
+          --set image.tag="${{ steps.meta.outputs.TAG }}" > rendered.yaml
+        test -s rendered.yaml || (echo "rendered.yaml is empty" && exit 1)
+
+    - name: Apply manifests inside AKS (private-safe)
+      run: |
+        az aks command invoke \
+          -g "$AKS_RG" -n "$AKS_NAME" \
+          --file rendered.yaml \
+          --command "kubectl apply -f rendered.yaml"
+
+    - name: Wait for rollout inside AKS
+      run: |
+        az aks command invoke \
+          -g "$AKS_RG" -n "$AKS_NAME" \
+          --command "kubectl rollout status deploy/$IMAGE_NAME --timeout=120s"
+
+    - name: Show status inside AKS
+      run: |
+        az aks command invoke \
+          -g "$AKS_RG" -n "$AKS_NAME" \
+          --command "kubectl get deploy,svc -l app.kubernetes.io/name=$IMAGE_NAME -o wide"
+
