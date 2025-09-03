@@ -1,0 +1,54 @@
+name: Build and Deploy to AKS
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: [ "app/**", "helm/**", ".github/workflows/deploy.yml" ]
+  workflow_dispatch:
+
+env:
+  REGISTRY_NAME: ${{ secrets.ACR_NAME }}   # e.g. aiplatabc123 (no .azurecr.io)
+  AKS_RG:       ${{ secrets.AKS_RG }}      # e.g. Keith-ai-rg
+  AKS_NAME:     ${{ secrets.AKS_NAME }}    # e.g. ai-plat-dev-aks
+  IMAGE_NAME:   ai-service
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        client-secret:   ${{ secrets.AZURE_CLIENT_SECRET }}
+
+    - name: Resolve ACR login server
+      id: acr
+      run: echo "LOGIN_SERVER=$(az acr show --name $REGISTRY_NAME --query loginServer -o tsv)" >> "$GITHUB_OUTPUT"
+
+    - name: Compute image tag
+      id: meta
+      shell: bash
+      run: |
+        SHORT_SHA="${GITHUB_SHA::7}"
+        TAG="$(date +%Y%m%d%H%M%S)-$SHORT_SHA"
+        echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+
+    - name: Build & Push image with ACR Tasks
+      run: |
+        az acr build --registry "$REGISTRY_NAME" \
+          --image "$IMAGE_NAME:${{ steps.meta.outputs.TAG }}" \
+          --file app/Dockerfile ./app
+
+    - uses: azure/setup-helm@v4
+    - name: Get AKS credentials
+      run: az aks get-credentials -g "$AKS_RG" -n "$AKS_NAME" --overwrite-existing
+    - name: Helm upgrade/install
+      run: |
+        helm upgrade --install "$IMAGE_NAME" ./helm/ai-service \
+          --set image.repository="${{ steps.acr.outputs.LOGIN_SERVER }}/$IMAGE_NAME" \
+          --set image.tag="${{ steps.meta.outputs.TAG }}"
+        kubectl rollout status deploy/$IMAGE_NAME
